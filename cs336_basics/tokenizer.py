@@ -4,156 +4,209 @@ from collections import defaultdict
 from itertools import pairwise
 from typing import List, Tuple, Dict
 from cs336_basics.pretokenization_example import find_chunk_boundaries
+import regex as re
+from collections import defaultdict, Counter
+from typing import List, Tuple, Dict
+from tqdm import tqdm
+
+
+PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+# class BPEtokenizer():
+#     def __init__(self, vocab={}, merges=[], special_tokens=None):
+#         self.special_tokens = []
+#         if vocab == {}:
+#             self.vocab = {i: bytes([i]) for i in range(256)}
+#             self.token_to_id = {bytes([i]): i for i in range(256)}
+#         else:
+#             self.vocab = vocab
+#         self.merges = merges
+#         self.word_count = Counter() # word count
+#         self.special_tokens = special_tokens
+    
+#     def from_files(cls, vocab_filepath, merges_filepath, special_tokens=None):
+#         # read and return vocab and merges
+#         pass 
+
+
+#     def encode(self, text: str) -> list[int]: 
+#         # encode and return text output 
+#         pass
+
+#     def encode_iterable(self, iterable):
+#         pass 
+
+#     def train(self, input_path: str, vocab_size: int = 259, special_tokens: list[str] = []):
+#         # read file 
+#         # with open(input_path, "rb") as f:
+#         with open(input_path, "r", encoding="utf-8") as f:
+#             text = f.read(1024 * 1024 * 1000)
+
+#         # add special token to the vocab lookup
+#         for spl_token in special_tokens:
+#             token_bytes = spl_token.encode("utf-8")
+#             if token_bytes not in self.token_to_id:
+#                 curr_idx = len(self.vocab)
+#                 self.vocab[curr_idx] = token_bytes
+#                 self.token_to_id[token_bytes] = curr_idx
+        
+#         # split text on special tokens, first split on special tokens,
+#         text_chunk = [text]
+#         for chunk in text_chunk:
+#             new_chunks = []
+#             for spl_token in special_tokens:
+#                 chunk = chunk.split(spl_token)
+#                 # chunk = [c.strip() for c in chunk] # strip may be not needed
+#                 new_chunks.extend(chunk)
+#             text_chunk = new_chunks
+        
+#         # using regex implementation
+#         # escaped = [re.escape(tok) for tok in special_tokens] # escaped, because we can be special regex characters such as . which will lead to bad matching 
+#         # split_pat = f"{"|".join(escaped)}"
+#         # text_chunk = re.split(split_pat, text)
+
+        
+#         # create word count for each chunk 
+#         for chunk in text_chunk:
+#             if chunk in special_tokens:
+#                 continue
+#             for match in re.finditer(PAT, chunk):
+#                 self.word_count[tuple([bytes([b]) for b in match.group(0).encode("utf-8")])] += 1
+#         # print(self.word_count)
+#         # merge characters till we reach the desired vocab size 
+#         iter_nums = vocab_size - len(self.vocab)
+#         for _ in range(iter_nums):
+#             current_pair_count = Counter()
+#             # calculate pair stats
+#             for word, count in self.word_count.items():
+#                 for w1, w2 in pairwise(word):
+#                     current_pair_count[(w1, w2)] += count
+#             # break
+#             if not current_pair_count:
+#                 continue
+
+#             # get max_count and merge this pair
+#             pair, count = max(current_pair_count.items(), key = lambda x: (x[1], x[0]))
+#             self.merges.append(pair)
+#             new_token = pair[0] + pair[1]
+            
+#             if new_token in self.token_to_id: # seen this token earlier
+#                 continue
+            
+#             curr_idx = len(self.vocab)
+#             self.vocab[curr_idx] = new_token
+#             self.token_to_id[new_token] = curr_idx
+
+
+#             new_word_count = Counter()
+#             for word, count in self.word_count.items():
+#                 new_word = []
+#                 i = 0
+#                 while i < len(word):
+#                     if i < len(word)-1 and word[i] == pair[0] and word[i+1] == pair[1]:
+#                         new_word.append(new_token)
+#                         i += 2
+#                     else:
+#                         new_word.append(word[i])
+#                         i += 1
+
+#                 new_word_count[tuple(new_word)] += count
+#             self.word_count = new_word_count
+#         return self.vocab, self.merges
 
 class BPEtokenizer():
     def __init__(self):
-        self.special_tokens = []
-        self.pair_counts = collections.defaultdict(int)
-        self.pair_to_words = collections.defaultdict(list) # multiple words 
-        self.vocab  = {i: bytes(i) for i in range(256)}
+        self.vocab = {i: bytes([i]) for i in range(256)}
+        self.token_to_id = {bytes([i]): i for i in range(256)}
         self.merges = []
-        # self.splitter = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
-        self.splitter_pattern = re.compile(r"""'(?:[sdmt]|ll|ve|re)| ?[a-zA-Z]+| ?[0-9]+| ?[^a-zA-Z0-9\s]+|\s+(?!\S)|\s+""")
-    
-    def train(self, input_path: str, vocab_size: int = 259, special_tokens: list[str] = []):
-        # update special tokens
-        self.special_tokens = special_tokens
-        for token_str in self.special_tokens:
-            if token_str.encode("utf-8") not in self.vocab:
-                self.vocab[len(self.vocab)] = token_str.encode("utf-8")
 
-        # Initilize vocab 
-        word_counts = self.load_data(input_path)
-        self.word_counts = word_counts
-        
-        # print(len(self.word_counts))
-        for word, count in word_counts.items():
-            for c1, c2 in pairwise(word):
-                self.pair_counts[(c1, c2)] += count
-                self.pair_to_words[(c1, c2)].append(word)
-
-        # Perform BPE merges
-        initial_vocab_size = len(self.vocab)
-        num_merges = vocab_size - initial_vocab_size
-
-        for i in range(num_merges):
-            self.merge()
-        
-        # self.vocab = {k: v for k, v in self.vocab.items()}
-
-        def is_valid_token(b: bytes) -> bool:
-            if not b:
-                return False  # b''
-            if all(byte == 0 for byte in b):
-                return False  # b'\x00\x00...'
-            try:
-                b.decode("utf-8")
-            except UnicodeDecodeError:
-                return False
-            return True
-
-        # ONLY clean tokens **added after** base vocab
-        self.vocab = {
-            k: v
-            for k, v in self.vocab.items()
-        }
-        return self.vocab, self.merges
-
-    def process_chunk(self, input_path, start, end):
-        local_word_counts = collections.defaultdict(int)
-        # load chunk and create word statistics for local chunk
-        with open(input_path, "rb") as f:
-            f.seek(start)
-            chunk_text = f.read(end - start).decode("utf-8", errors='replace')
-
-            # each chunk should split by special characters
-            text_parts = [chunk_text]
-            for token_str in self.special_tokens:
-                new_chunk_text = []
-                for parts in text_parts:
-                    new_chunk_text.extend(parts.split(token_str))
-                text_parts = new_chunk_text
-
-            # each chunk is text between special token 
-            for sub_chunk in text_parts:
-                if not sub_chunk:
-                    continue
-                p_iter = self.splitter_pattern.finditer(sub_chunk)
-                for match in p_iter:
-                    word_bytes = match.group().encode("utf-8")
-                    word_tuple = tuple([bytes([b]) for b in word_bytes])
-                    local_word_counts[word_tuple] += 1
-                    # word_tuple = tuple([bytes([b]) for b in match.group().encode("utf-8")])
-                    # local_word_counts[word_tuple] += 1
-        return local_word_counts
-
-
-    def load_data(self, input_path):
+    def chunked_data(input_path, num_processes, special_token=b"<|endoftext|>"):
+        # parallel logic 
         chunks = []
-        with open(input_path, "rb") as f:
+        with open(input_path, "rb") as f: # type: ignore
             num_processes = 4
-            boundaries = find_chunk_boundaries(f, num_processes, b"<|endoftext|>") # start, end 
-        
-        for start, end in zip(boundaries[:-1], boundaries[1:]):
-            chunk = self.process_chunk(input_path, start, end)
-            chunks.append(chunk)
-        word_counts = defaultdict(int)
-        for local_dict in chunks:
-            for word, count in local_dict.items():
-                word_counts[word] += count
-        return word_counts
+            boundaries = find_chunk_boundaries(f, desired_num_chunks=num_processes, split_special_token=special_token)
 
-    def merge(self):
-        if not self.pair_counts:
-            return
+            # The following is a serial implementation, but you can parallelize this
+            # by sending each start/end pair to a set of processes.
+            for start, end in zip(boundaries[:-1], boundaries[1:]):
+                f.seek(start)
+                chunk = f.read(end - start).decode("utf-8", errors="ignore")
+                chunks.append(chunk)
+        return chunks
 
-        # Find most frequent pair
-        most_frequent_pair = max(
-                self.pair_counts.items(),
-                key=lambda x: (x[1], x[0])  # frequency, then lexicographic tie-break
-            )[0]
-        pair_freq = self.pair_counts[most_frequent_pair]
+    def train(self, input_path: str, vocab_size: int = 259, special_tokens: list[str] = []):
+        # load file 
+        with open(input_path, "r", encoding="utf-8") as f:
+            text = f.read(1024 * 1024 * 1000)
 
-        if not most_frequent_pair[0] or not most_frequent_pair[1]:
-            return  # Skip invalid merge
+        # split on the special tokens 
+        for spl_token in special_tokens:
+            byte_token = spl_token.encode("utf-8") # byte token
+            if byte_token in self.token_to_id:
+                continue 
+            curr_idx = len(self.vocab)
+            self.vocab[curr_idx] = byte_token
+            self.token_to_id[byte_token] = curr_idx
 
-        # print(f"Merging pair: {most_frequent_pair} (freq: {pair_freq})")
-        merged_symbol = most_frequent_pair[0] + most_frequent_pair[1]
-        merged_token = tuple([merged_symbol])
+        # chunk the text    
+        text_chunks = [text]
+        for chunk in text_chunks:
+            new_chunks = []
+            for spl_token in special_tokens:
+                # byte_token = spl_token.encode("utf-8") # byte token
+                new_chunks.extend(chunk.split(spl_token))
+            text_chunks = new_chunks
 
-        new_word_counts = collections.defaultdict(int)
+        # word stats 
+        # escaped = [re.escape(tok) for tok in special_tokens]
+        # spl_pattern = f"{"|".join(escaped)}"
+        # text_chunks = re.split(spl_pattern, text)
+        word_count = defaultdict(int)
+        for chunk in text_chunks:
+            for match in re.finditer(PAT, chunk):
+                word_count[tuple([bytes([b]) for b in match.group(0).encode("utf-8")])] += 1
+        n_train = vocab_size - len(self.vocab)
+        # print(n_train)
+        for _ in tqdm(range(n_train)):
+            # create pair stat
+            pair_stats = defaultdict(int)
+            for word, count in word_count.items():
+                for w1, w2 in pairwise(word):
+                    pair_stats[(w1, w2)] += count           
+            if not pair_stats:
+                continue
+            # best pair
+            # get max_count and merge this pair
+            best_pair, count = max(pair_stats.items(), key = lambda x: (x[1], x[0]))
+            # self.merges.append(pair)
+            # new_token = pair[0] + pair[1]
+            new_token = best_pair[0] + best_pair[1]
+            if not best_pair: continue  # empty   
+            if new_token in self.vocab: continue # already seen
+            self.merges.append(best_pair)
+            curr_idx = len(self.vocab)
+            self.vocab[curr_idx] = new_token
+            self.token_to_id[new_token] = curr_idx
 
-        for word, count in self.word_counts.items():
-            new_word = []
-            i = 0
-            while i < len(word):
-                # Check if current and next token match the pair
-                if i < len(word) - 1 and (word[i], word[i+1]) == most_frequent_pair:
-                    new_word.append(merged_symbol)
-                    i += 2  # Skip the next symbol (it's part of the merged pair)
-                else:
-                    new_word.append(word[i])
-                    i += 1
-            new_word_counts[tuple(new_word)] += count
-        
-        # Replace word counts with updated words
-        self.word_counts = new_word_counts
+            # combine 
+            new_word_count = Counter()
+            for word, count in word_count.items():
+                new_word = []
+                i = 0
+                while i < len(word):
+                    if i < len(word)-1 and word[i] == best_pair[0] and word[i + 1] == best_pair[1]:
+                        new_word.append(new_token)
+                        i += 2
+                    else:
+                        new_word.append(word[i])
+                        i += 1
+                new_word_count[tuple(new_word)] += count
+            # print(word_count)
+            # print(new_word_count)
+            word_count = new_word_count
+            # break
+        return self.vocab, self.merges, 
 
-        # Reset pair counts and pair-to-words map
-        self.pair_counts = collections.defaultdict(int)
-        self.pair_to_words = collections.defaultdict(list)
-
-        for word, count in self.word_counts.items():
-            for c1, c2 in pairwise(word):
-                self.pair_counts[(c1, c2)] += count
-                self.pair_to_words[(c1, c2)].append(word)
-
-        # Track the merge
-        self.merges.append(most_frequent_pair)
-
-        # Add to vocab if not already in
-        if merged_symbol not in self.vocab.values():
-            self.vocab[len(self.vocab)] = merged_symbol
 
 if __name__ == "__main__":
     tokenizer = BPEtokenizer()
