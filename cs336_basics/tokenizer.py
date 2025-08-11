@@ -1,3 +1,5 @@
+import base64
+import os
 import re
 import collections
 from collections import defaultdict
@@ -11,113 +13,17 @@ from tqdm import tqdm
 
 
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
-# class BPEtokenizer():
-#     def __init__(self, vocab={}, merges=[], special_tokens=None):
-#         self.special_tokens = []
-#         if vocab == {}:
-#             self.vocab = {i: bytes([i]) for i in range(256)}
-#             self.token_to_id = {bytes([i]): i for i in range(256)}
-#         else:
-#             self.vocab = vocab
-#         self.merges = merges
-#         self.word_count = Counter() # word count
-#         self.special_tokens = special_tokens
-    
-#     def from_files(cls, vocab_filepath, merges_filepath, special_tokens=None):
-#         # read and return vocab and merges
-#         pass 
-
-
-#     def encode(self, text: str) -> list[int]: 
-#         # encode and return text output 
-#         pass
-
-#     def encode_iterable(self, iterable):
-#         pass 
-
-#     def train(self, input_path: str, vocab_size: int = 259, special_tokens: list[str] = []):
-#         # read file 
-#         # with open(input_path, "rb") as f:
-#         with open(input_path, "r", encoding="utf-8") as f:
-#             text = f.read(1024 * 1024 * 1000)
-
-#         # add special token to the vocab lookup
-#         for spl_token in special_tokens:
-#             token_bytes = spl_token.encode("utf-8")
-#             if token_bytes not in self.token_to_id:
-#                 curr_idx = len(self.vocab)
-#                 self.vocab[curr_idx] = token_bytes
-#                 self.token_to_id[token_bytes] = curr_idx
-        
-#         # split text on special tokens, first split on special tokens,
-#         text_chunk = [text]
-#         for chunk in text_chunk:
-#             new_chunks = []
-#             for spl_token in special_tokens:
-#                 chunk = chunk.split(spl_token)
-#                 # chunk = [c.strip() for c in chunk] # strip may be not needed
-#                 new_chunks.extend(chunk)
-#             text_chunk = new_chunks
-        
-#         # using regex implementation
-#         # escaped = [re.escape(tok) for tok in special_tokens] # escaped, because we can be special regex characters such as . which will lead to bad matching 
-#         # split_pat = f"{"|".join(escaped)}"
-#         # text_chunk = re.split(split_pat, text)
-
-        
-#         # create word count for each chunk 
-#         for chunk in text_chunk:
-#             if chunk in special_tokens:
-#                 continue
-#             for match in re.finditer(PAT, chunk):
-#                 self.word_count[tuple([bytes([b]) for b in match.group(0).encode("utf-8")])] += 1
-#         # print(self.word_count)
-#         # merge characters till we reach the desired vocab size 
-#         iter_nums = vocab_size - len(self.vocab)
-#         for _ in range(iter_nums):
-#             current_pair_count = Counter()
-#             # calculate pair stats
-#             for word, count in self.word_count.items():
-#                 for w1, w2 in pairwise(word):
-#                     current_pair_count[(w1, w2)] += count
-#             # break
-#             if not current_pair_count:
-#                 continue
-
-#             # get max_count and merge this pair
-#             pair, count = max(current_pair_count.items(), key = lambda x: (x[1], x[0]))
-#             self.merges.append(pair)
-#             new_token = pair[0] + pair[1]
-            
-#             if new_token in self.token_to_id: # seen this token earlier
-#                 continue
-            
-#             curr_idx = len(self.vocab)
-#             self.vocab[curr_idx] = new_token
-#             self.token_to_id[new_token] = curr_idx
-
-
-#             new_word_count = Counter()
-#             for word, count in self.word_count.items():
-#                 new_word = []
-#                 i = 0
-#                 while i < len(word):
-#                     if i < len(word)-1 and word[i] == pair[0] and word[i+1] == pair[1]:
-#                         new_word.append(new_token)
-#                         i += 2
-#                     else:
-#                         new_word.append(word[i])
-#                         i += 1
-
-#                 new_word_count[tuple(new_word)] += count
-#             self.word_count = new_word_count
-#         return self.vocab, self.merges
-
 class BPEtokenizer():
-    def __init__(self):
-        self.vocab = {i: bytes([i]) for i in range(256)}
-        self.token_to_id = {bytes([i]): i for i in range(256)}
-        self.merges = []
+    def __init__(self, vocab={}, merges=[], special_tokens=[]):
+        if vocab == {}:
+            self.vocab = {i: bytes([i]) for i in range(256)}
+            self.token_to_id = {bytes([i]): i for i in range(256)}
+            self.merges = []
+        else:
+            self.vocab = vocab
+            self.merges = merges
+            self.token_to_id = {val: i for i, val in self.vocab.items()}
+        self.special_tokens = special_tokens
 
     def chunked_data(input_path, num_processes, special_token=b"<|endoftext|>"):
         # parallel logic 
@@ -133,6 +39,116 @@ class BPEtokenizer():
                 chunk = f.read(end - start).decode("utf-8", errors="ignore")
                 chunks.append(chunk)
         return chunks
+
+    @staticmethod
+    def _load_vocab(file_path: str | os.PathLike) -> Dict[int, bytes]:
+        vocab: Dict[int, bytes] = {}
+        with open(file_path, "r", encoding="utf-8") as f:
+            for line in f:
+                if not line.strip() or line.startswith("#"):
+                    continue                   # skip header / blank lines
+                idx_str, tok_b64 = line.rstrip("\n").split("\t")
+                idx = int(idx_str)
+                vocab[idx] = base64.b64decode(tok_b64)
+        return vocab
+    
+    @staticmethod
+    def _load_merges(file_path: str | os.PathLike) -> List[Tuple[bytes, bytes]]:
+        merges: List[Tuple[bytes, bytes]] = []
+        with open(file_path, "r", encoding="utf-8") as f:
+            for line in f:
+                if not line.strip() or line.startswith("#"):
+                    continue
+                t1_b64, t2_b64 = line.rstrip("\n").split(" ")
+                merges.append(
+                    (base64.b64decode(t1_b64), base64.b64decode(t2_b64))
+                )
+        return merges
+
+    @classmethod
+    def from_files(cls, vocab_filepath: str, merges_filepath: str, special_tokens: list[str] | None = None):
+        vocab = cls._load_vocab(vocab_filepath)
+        merges = cls._load_merges(merges_filepath)
+        return cls(vocab, merges, special_tokens)
+    
+    def encode(self, text: str) -> list[int]:
+        special_tokens = self.special_tokens if self.special_tokens is not None else []
+        merge_ranks = {pair: i for i, pair in enumerate(self.merges)}
+
+        if special_tokens:
+            sorted_specials = sorted(special_tokens, key=len, reverse=True)
+            escaped = [re.escape(tok) for tok in sorted_specials]
+            split_pat = f"({'|'.join(escaped)})"
+            chunks = re.split(split_pat, text)
+        else:
+            chunks = [text]
+
+        token_ids = []
+        after_special = False  # NEW: track if last chunk was a special token
+
+        for chunk in chunks:
+            if not chunk:
+                continue
+
+            if chunk in special_tokens:
+                token_ids.append(self.token_to_id[chunk.encode("utf-8")])
+                after_special = True
+                continue
+
+            # Byte-level tokens
+            tokens = []
+            for match in re.finditer(PAT, chunk):
+                tokens.extend([bytes([b]) for b in match.group(0).encode("utf-8")])
+
+            if after_special and len(tokens) >= 2 and tokens[0] == b'\n' and tokens[1] == b'\n':
+                # Check raw chunk to see what follows the two newlines
+                # If next char is non-whitespace -> keep separate; else allow merges.
+                if re.match(r'^\n\n(?=\S)', chunk):
+                    # emit two separate newline tokens, continue merging the remainder
+                    token_ids.append(self.token_to_id[b'\n'])
+                    token_ids.append(self.token_to_id[b'\n'])
+                    tokens = tokens[2:]
+                # else: do nothing here, let merge loop attempt to merge b'\n', b'\n' as usual
+
+
+            # Apply merges
+            while len(tokens) > 1:
+                pairs = [(tokens[i], tokens[i + 1]) for i in range(len(tokens) - 1)]
+                ranked_pairs = [(merge_ranks.get(pair, float('inf')), pair) for pair in pairs]
+                best_rank, best_pair = min(ranked_pairs, key=lambda x: x[0])
+
+                if best_rank == float('inf'):
+                    break
+
+                new_tokens = []
+                i = 0
+                while i < len(tokens):
+                    if i < len(tokens) - 1 and tokens[i] == best_pair[0] and tokens[i + 1] == best_pair[1]:
+                        new_tokens.append(tokens[i] + tokens[i + 1])
+                        i += 2
+                    else:
+                        new_tokens.append(tokens[i])
+                        i += 1
+                tokens = new_tokens
+
+            token_ids.extend([self.token_to_id[tok] for tok in tokens])
+            after_special = False  # reset flag after processing chunk
+
+        return token_ids
+    
+    def decode(self, ids: list[int]) -> str:
+        """
+        Convert a list of token IDs back into the original string.
+        """
+        # Convert each id to its byte sequence
+        tokens_bytes = [self.vocab[i] for i in ids]
+
+        # Concatenate all byte sequences
+        text_bytes = b"".join(tokens_bytes)
+
+        # Decode to string
+        return text_bytes.decode("utf-8", errors="replace")
+
 
     def train(self, input_path: str, vocab_size: int = 259, special_tokens: list[str] = []):
         # load file 
@@ -206,10 +222,64 @@ class BPEtokenizer():
             word_count = new_word_count
             # break
         return self.vocab, self.merges, 
+    
+    from collections.abc import Iterable, Iterator
+    def encode_iterable(self, iterable):
+        """
+        Lazily yield token IDs from an iterable of strings (e.g., file lines).
+        Useful for large files that can't be loaded fully into memory.
+        """
+        special_tokens = self.special_tokens if self.special_tokens is not None else []
+        merge_ranks = {pair: i for i, pair in enumerate(self.merges)}
+
+        for text in iterable:
+            if special_tokens:
+                escaped = [re.escape(tok) for tok in special_tokens]
+                split_pat = f"({'|'.join(escaped)})"
+                chunks = re.split(split_pat, text)
+            else:
+                chunks = [text]
+
+            for chunk in chunks:
+                if not chunk:
+                    continue
+
+                if chunk in special_tokens:
+                    yield self.token_to_id[chunk.encode("utf-8")]
+                    continue
+
+                # Byte-level tokenization
+                tokens = []
+                for match in re.finditer(PAT, chunk):
+                    tokens.extend(tuple([bytes([b]) for b in match.group(0).encode("utf-8")]))
+
+                # Apply merges
+                while len(tokens) > 1:
+                    pairs = [(tokens[i], tokens[i + 1]) for i in range(len(tokens) - 1)]
+                    ranked_pairs = [(merge_ranks.get(pair, float('inf')), pair) for pair in pairs]
+                    best_rank, best_pair = min(ranked_pairs, key=lambda x: x[0])
+
+                    if best_rank == float('inf'):
+                        break
+
+                    new_tokens = []
+                    i = 0
+                    while i < len(tokens):
+                        if i < len(tokens) - 1 and tokens[i] == best_pair[0] and tokens[i + 1] == best_pair[1]:
+                            new_tokens.append(tokens[i] + tokens[i + 1])
+                            i += 2
+                        else:
+                            new_tokens.append(tokens[i])
+                            i += 1
+                    tokens = new_tokens
+
+                for tok in tokens:
+                    yield self.token_to_id[tok]
 
 
 if __name__ == "__main__":
     tokenizer = BPEtokenizer()
     vocab, merges = tokenizer.train("./data/test_data.txt", vocab_size=260, special_tokens=["<|endoftext|>"])
+    # n_vocab, n_merges = tokenizer.from_files("")
     print(vocab, "\n\n")
     print(merges, "\n\n")
