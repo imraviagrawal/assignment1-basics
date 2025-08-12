@@ -105,4 +105,58 @@ class Rope(nn.Module):
             x[...,token_positions,::2] = even * c - odd *s
             x[..., token_positions, 1::2] = tmp
         return x
+import torch
+import torch.nn as nn
 
+class Rope(nn.Module):
+    def __init__(self, theta, d_k, max_seq_len, device=None):
+        super().__init__()
+        assert d_k % 2 == 0, "d_k must be even"
+        self.theta = theta
+        self.d_k = d_k
+        self.max_seq_len = max_seq_len
+
+        if theta != 0:
+            i = torch.arange(max_seq_len, device=device)[:, None]         # positions
+            k = torch.arange(d_k // 2, device=device)[None, :]            # pair index
+            angles = i / (theta ** (2 * k / d_k))
+            cos = angles.cos()
+            sin = angles.sin()
+            self.register_buffer("cos", cos, persistent=False)
+            self.register_buffer("sin", sin, persistent=False)
+
+    def forward(self, x: torch.Tensor, token_positions: torch.Tensor = None) -> torch.Tensor:
+        if self.theta == 0:
+            return x
+
+        if token_positions is None:
+            c = self.cos[:x.size(-2)]   # (seq_len, d_k//2)
+            s = self.sin[:x.size(-2)]
+        else:
+            c = self.cos.index_select(0, token_positions)
+            s = self.sin.index_select(0, token_positions)
+
+        even = x[..., ::2]
+        odd  = x[..., 1::2]
+        x_rotated = torch.empty_like(x)
+        x_rotated[..., ::2] = even * c - odd * s
+        x_rotated[..., 1::2] = even * s + odd * c
+        return x_rotated
+
+class Softmax(nn.Module):
+    def __init__(self, dim=-1):
+        super().__init__()
+        self.dim=dim
+
+
+    def forward(self, x):
+        # scale so that large value does not lead to inf value 
+        max_val, _ = x.max(dim=self.dim, keepdim=True) # last dim max 
+        
+        # exp 
+        x_scaled = torch.exp(x - max_val) # exp(x) 
+        
+        # sum of exp 
+        x_sum = torch.sum(x_scaled, dim=self.dim, keepdim=True) # sum of exp(x) along last dim
+
+        return x_scaled / x_sum # exp(x) / sum(exp(x)), may be need broadcase
