@@ -150,6 +150,9 @@ class Softmax(nn.Module):
 
 
     def forward(self, x):
+        orig_dtype = x.dtype
+
+        x = x.float() # full precision
         # scale so that large value does not lead to inf value 
         max_val, _ = x.max(dim=self.dim, keepdim=True) # last dim max 
         
@@ -159,4 +162,6 @@ class Softmax(nn.Module):
         # sum of exp 
         x_sum = torch.sum(x_scaled, dim=self.dim, keepdim=True) # sum of exp(x) along last dim
 
-        return x_scaled / x_sum # exp(x) / sum(exp(x)), may be need broadcase
+        out = x_scaled / x_sum
+        
+        return out.to(orig_dtype) # exp(x) / sum(exp(x)), may be need broadcase
