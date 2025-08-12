@@ -61,3 +61,48 @@ class PositionwiseFeedForward(nn.Module):
         w_1x = self.w1.forward(x) # d_model, d_ff
         w_3x = self.w3.forward(x) # d_model, d_ff
         return self.w2.forward(silu(w_1x)*w_3x)
+
+class Rope(nn.Module):
+    def __init__(self, theta, d_k, max_seq_len, device=None):
+        super().__init__()
+        self.theta = theta
+        self.d_k = d_k
+        self.max_seq_len = max_seq_len
+
+
+        if self.theta != 0:
+            i_vec = torch.arange(max_seq_len, device=device)[:, None]
+            k_vec = torch.arange(d_k//2, device=device)[None, :]
+
+            thetas = i_vec / theta ** (2*k_vec/d_k)
+            R = torch.stack((thetas.cos(), thetas.sin()))
+
+            R = R.to(device=device)
+            self.register_buffer("R", R, persistent=False)
+
+    def forward(self, x: torch.Tensor, token_positions: torch.Tensor) -> torch.Tensor:
+        # basic Version 
+        if self.theta == 0:
+            return x
+        
+        seq_len = x.shape[-2] # last dim, (batch, seq, token id)
+        if token_positions is None:
+            even = x[..., ::2]
+            odd = x[..., 1::2]
+            c = self.R[0, :seq_len ,...]
+            s = self.R[1, :seq_len ,...]
+            tmp = even*s + odd*c
+            x[..., ::2] = even*c - odd*s
+            x[..., 1::2] = tmp
+
+        else:
+            even = x[..., token_positions, ::2]
+            odd = x[..., token_positions, 1::2]
+
+            c = self.R[0, token_positions, ...]
+            s = self.R[1, token_positions, ...]
+            tmp = even*s + odd*c
+            x[...,token_positions,::2] = even * c - odd *s
+            x[..., token_positions, 1::2] = tmp
+        return x
+

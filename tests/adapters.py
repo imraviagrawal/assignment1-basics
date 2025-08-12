@@ -207,7 +207,9 @@ def run_rope(
     Returns:
         Float[Tensor, " ... sequence_length d_k"]: Tensor with RoPEd input.
     """
-    raise NotImplementedError
+    from cs336_basics.nn import Rope
+    rope = Rope(theta=theta, d_k=d_k, max_seq_len=max_seq_len, device=None)
+    return rope.forward(in_query_or_key, token_positions)
 
 
 def run_transformer_block(
