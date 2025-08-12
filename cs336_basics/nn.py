@@ -26,3 +26,38 @@ class Embedding(nn.Module):
 
     def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
         return self.param[token_ids]
+    
+class RMSnorm(nn.Module):
+    def __init__(self, d_modal:int, eps: float = 1e-5, device=None, dtype=None):
+        super().__init__()
+        self.d_modal = d_modal
+        self.eps = eps
+        self.param = nn.Parameter(torch.ones(d_modal, device=device, dtype=dtype)) # d_modal
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # upscale input to float32 to avoid overflow
+        in_type = x.dtype
+        x = x.to(torch.float32)
+
+        norm = x.square().mean(dim=-1, keepdim=True)
+        result = (x*self.param)/torch.sqrt(norm - self.eps)
+        # result = (x*torch.sqrt(1/))
+        return result.to(in_type)
+
+def silu(param: torch.Tensor): 
+    return param*torch.sigmoid(param) # implement
+
+class PositionwiseFeedForward(nn.Module):
+    def __init__(self, d_model, d_ff = None, device=None, dtype=None):
+        super().__init__()
+        self.d_model = d_model
+        if d_ff == None:
+            d_ff = int(np.ceil(8*d_model // 3 / 64) * 64)
+        self.w1 = Linear(in_features=d_model, out_features=d_ff, device=device, dtype=dtype)
+        self.w2 = Linear(in_features=d_ff, out_features=d_model, device=device, dtype=dtype)
+        self.w3 = Linear(in_features=d_model, out_features=d_ff, device=device, dtype=dtype)
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor: 
+        w_1x = self.w1.forward(x) # d_model, d_ff
+        w_3x = self.w3.forward(x) # d_model, d_ff
+        return self.w2.forward(silu(w_1x)*w_3x)
