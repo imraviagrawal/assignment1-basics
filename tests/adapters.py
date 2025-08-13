@@ -111,7 +111,10 @@ def run_scaled_dot_product_attention(
     Returns:
         Float[Tensor, " ... queries d_v"]: Output of SDPA
     """
-    raise NotImplementedError
+    from cs336_basics.nn import scaled_dot_product_attention
+    value, attn = scaled_dot_product_attention(Q, K, V, mask)
+    return value
+    # raise NotImplementedError
 
 
 def run_multihead_self_attention(
@@ -145,7 +148,13 @@ def run_multihead_self_attention(
         Float[Tensor, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
+    # max_seq_length, theta, device = None, dtype=None
+    from cs336_basics.nn import MultiHeadAttention
+    max_seq_len = in_features.shape[-2]
+    multiheadattn = MultiHeadAttention(d_model=d_model, num_heads=num_heads, max_seq_length=max_seq_len, theta=0)
+    multiheadattn.W_QKV.weight.data = torch.concat([q_proj_weight, k_proj_weight, v_proj_weight], dim=0)
+    multiheadattn.W_O.weight.data = o_proj_weight
+    return multiheadattn.forward(in_features, token_positions=None)
 
 
 def run_multihead_self_attention_with_rope(
@@ -185,7 +194,12 @@ def run_multihead_self_attention_with_rope(
         Float[Tensor, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
+    from cs336_basics.nn import MultiHeadAttention
+    multiheadattn = MultiHeadAttention(d_model=d_model, num_heads=num_heads, max_seq_length=max_seq_len, theta=theta)
+    multiheadattn.W_QKV.weight.data = torch.concat([q_proj_weight, k_proj_weight, v_proj_weight], dim=0)
+    multiheadattn.W_O.weight.data = o_proj_weight
+    return multiheadattn.forward(in_features, token_positions=token_positions)
+    # raise NotImplementedError
 
 
 def run_rope(
@@ -229,7 +243,7 @@ def run_transformer_block(
     Depending on your implementation, you may simply need to pass the relevant args
     to your TransformerBlock constructor, or you may need to initialize your own RoPE
     class and pass that instead.
-
+    
     Args:
         d_model (int): The dimensionality of the Transformer block input.
         num_heads (int): Number of heads to use in multi-headed attention. `d_model` must be
@@ -282,7 +296,16 @@ def run_transformer_block(
         Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
-    raise NotImplementedError
+    from cs336_basics.nn import transformer_block
+    TransformerBlock = transformer_block(d_model=d_model, num_heads=num_heads, d_ff=d_ff, max_seq_length=max_seq_len, theta=theta)
+    TransformerBlock.MHA.W_QKV.weight.data = torch.cat((weights["attn.q_proj.weight"], weights["attn.k_proj.weight"], weights["attn.v_proj.weight"]), dim=0)
+    TransformerBlock.MHA.W_O.weight.data = weights["attn.output_proj.weight"]
+    TransformerBlock.FFN.w1.weight.data = weights["ffn.w1.weight"]
+    TransformerBlock.FFN.w2.weight.data = weights["ffn.w2.weight"]
+    TransformerBlock.FFN.w3.weight.data = weights["ffn.w3.weight"]
+    TransformerBlock.RMSNorm1.param.data = weights["ln1.weight"]
+    TransformerBlock.RMSNorm2.param.data = weights["ln2.weight"]
+    return TransformerBlock.forward(X=in_features)
 
 
 def run_transformer_lm(
@@ -364,7 +387,22 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-    raise NotImplementedError
+    from cs336_basics.nn import transfoer_lm
+    TransformerLM = transfoer_lm(d_model=d_model,num_heads=num_heads,vocab_size=vocab_size,context_length=context_length,num_layers=num_layers, d_ff=d_ff,theta=rope_theta)
+    TransformerLM.embedding.param.data = weights["token_embeddings.weight"]
+    for num_layer in range(num_layers):
+        # TransformerBlock = transformer.transformer_block(d_model=d_model,d_ff=d_ff, num_heads=num_heads, max_seq_length=context_length, theta=rope_theta)
+        TransformerLM.layers[num_layer].MHA.W_QKV.weight.data = torch.cat((weights[f"layers.{num_layer}.attn.q_proj.weight"], weights[f"layers.{num_layer}.attn.k_proj.weight"], weights[f"layers.{num_layer}.attn.v_proj.weight"]), dim=0)
+        TransformerLM.layers[num_layer].MHA.W_O.weight.data = weights[f"layers.{num_layer}.attn.output_proj.weight"]
+        TransformerLM.layers[num_layer].FFN.w1.weight.data = weights[f"layers.{num_layer}.ffn.w1.weight"]
+        TransformerLM.layers[num_layer].FFN.w2.weight.data = weights[f"layers.{num_layer}.ffn.w2.weight"]
+        TransformerLM.layers[num_layer].FFN.w3.weight.data = weights[f"layers.{num_layer}.ffn.w3.weight"]
+        TransformerLM.layers[num_layer].RMSNorm1.param.data = weights[f"layers.{num_layer}.ln1.weight"]
+        TransformerLM.layers[num_layer].RMSNorm2.param.data = weights[f"layers.{num_layer}.ln2.weight"]
+    TransformerLM.final_RMSNorm.param.data = weights["ln_final.weight"]
+    TransformerLM.output_layer.weight.data = weights["lm_head.weight"]
+
+    return TransformerLM.forward(X = in_indices)
 
 
 def run_rmsnorm(
