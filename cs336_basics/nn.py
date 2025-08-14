@@ -286,3 +286,28 @@ class transfoer_lm(nn.Module):
         X = self.output_layer(X)
         return X
         
+
+def cross_entropy_loss(logits, targets):
+    # logits = einops.rearrange(logits, "b c ...., (b c) ...")
+    # targets = einops.rearrange(targets, "b c ...., (b c) ...")
+    # m = torch.max(logits, dim=-1, keepdim=True)
+    # subm = logits - m.values
+    # x_exp = torch.exp(subm)
+    # sums = torch.sum(x_exp, dim=-1, keepdim=True)
+    # result = torch.gather(subm, 1, targets.unsqueeze(1)).sum()/len(targets)
+    # diff = result - torch.mean(torch.log(sums))
+    # return -diff
+    # log softmax = (x-max) - log(sum(exp(x-m)))
+    logits = logits.reshape(-1, logits.size(-1)) #(b*s, C)
+    targets = targets.reshape(-1) # (B, C)
+
+    max_vals, _ = torch.max(logits, dim=-1, keepdim=True) # (b*s, C)
+    logits_shifted = logits - max_vals # (b*s, C)
+
+    # compute log sum exp 
+    log_sum_exp = torch.log(torch.sum(torch.exp(logits_shifted), dim=-1, keepdim=True)) # (b*s, C)
+    log_probs = logits_shifted - log_sum_exp # (b*s, C)
+
+    # corrext probs
+    correct_log_probs = log_probs.gather(1, targets.unsqueeze(1)) # (b*s, 1)
+    return -correct_log_probs.mean()
