@@ -50,7 +50,7 @@ class AdamW(torch.optim.Optimizer):
                 # updates
                 denom = v.sqrt() + eps
                 p.data.addcdiv_(m, denom, value=-alpha_t) # inplace update
-                
+
                 if lambda_wd != 0:
                     p.data.mul_(1 - lr*lambda_wd)
                 # we update p.data not grad
@@ -61,4 +61,50 @@ class AdamW(torch.optim.Optimizer):
                 state["t"] = t+1
         return loss
 
+class scheduler():
+    def __init__(self, optimizer, iter=0):
+        self.optimizer = optimizer
+        self.iter = iter
 
+    def get_lr(self):
+        raise NotImplemented
+    
+    def step(self):
+        lr = self.get_lr()
+
+        self.iter += 1
+
+        for group in self.optimizer.param_groups:
+            group["lr"] = lr
+
+
+class cosine(scheduler):
+    def __init__(self, optimizer, iter, max_lr, min_lr, warmup_end, cosine_end):
+        super().__init__(optimizer, iter)
+        self.max_lr = max_lr
+        self.min_lr = min_lr
+        self.warmup_end = warmup_end
+        self.cosine_end = cosine_end
+
+    def get_lr(self):
+        it = self.iter
+        if it < self.warmup_end:
+            return (it/max(self.warmup_end, 1))*self.max_lr
+        
+        elif self.warmup_end <= it <= self.cosine_end:
+            return self.min_lr + 0.5*(1 + math.cos(((it - self.warmup_end)*math.pi)/(self.cosine_end - self.warmup_end)))*(self.max_lr - self.min_lr)
+        else:
+            return self.min_lr
+        
+def learning_rate_schedule(it: int,
+    max_learning_rate: float,
+    min_learning_rate: float,
+    warmup_iters: int,
+    cosine_cycle_final_iter: int):
+
+    if it < warmup_iters: 
+        return (it/warmup_iters)*max_learning_rate
+    elif warmup_iters <= it <= cosine_cycle_final_iter:
+        return min_learning_rate + .5*(1 + math.cos((it - warmup_iters)*math.pi/(cosine_cycle_final_iter - warmup_iters)))*(max_learning_rate-min_learning_rate)
+    else:
+        return min_learning_rate
