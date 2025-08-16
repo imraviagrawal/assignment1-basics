@@ -108,3 +108,30 @@ def learning_rate_schedule(it: int,
         return min_learning_rate + .5*(1 + math.cos((it - warmup_iters)*math.pi/(cosine_cycle_final_iter - warmup_iters)))*(max_learning_rate-min_learning_rate)
     else:
         return min_learning_rate
+    
+# def gradient_clipping(parameters, max_l2_norm, eps = 1e-6):
+#     # update the parameter where gradient is larger than norms 
+#     for param in parameters:
+#         if param.grad is None: 
+#             continue
+#         param_norms = param.grad.norm()
+#         param.grad.mul_(max_l2_norm/(param_norms + eps))
+
+
+def gradient_clipping(parameters, max_l2_norm, eps=1e-6):
+    params = [p for p in parameters if p.grad is not None]
+    if not params:
+        return 0.0
+
+    # Compute total norm
+    total_norm = torch.norm(
+        torch.stack([torch.norm(p.grad.detach(), 2) for p in params]), 2
+    )
+
+    # Only scale if norm too big
+    if total_norm > max_l2_norm:
+        scale = max_l2_norm / (total_norm + eps)
+        for p in params:
+            p.grad.mul_(scale)
+
+    return total_norm.item()

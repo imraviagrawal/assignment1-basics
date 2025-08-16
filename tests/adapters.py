@@ -112,7 +112,7 @@ def run_scaled_dot_product_attention(
         Float[Tensor, " ... queries d_v"]: Output of SDPA
     """
     from cs336_basics.nn import scaled_dot_product_attention
-    value, attn = scaled_dot_product_attention(Q, K, V, mask)
+    value = scaled_dot_product_attention(Q, K, V, mask)
     return value
     # raise NotImplementedError
 
@@ -152,7 +152,10 @@ def run_multihead_self_attention(
     from cs336_basics.nn import MultiHeadAttention
     max_seq_len = in_features.shape[-2]
     multiheadattn = MultiHeadAttention(d_model=d_model, num_heads=num_heads, max_seq_length=max_seq_len, theta=0)
-    multiheadattn.W_QKV.weight.data = torch.concat([q_proj_weight, k_proj_weight, v_proj_weight], dim=0)
+    # multiheadattn.W_QKV.weight.data = torch.concat([q_proj_weight, k_proj_weight, v_proj_weight], dim=0)
+    multiheadattn.W_Q.weight.data = q_proj_weight
+    multiheadattn.W_K.weight.data = k_proj_weight
+    multiheadattn.W_V.weight.data = v_proj_weight
     multiheadattn.W_O.weight.data = o_proj_weight
     return multiheadattn.forward(in_features, token_positions=None)
 
@@ -196,7 +199,10 @@ def run_multihead_self_attention_with_rope(
     """
     from cs336_basics.nn import MultiHeadAttention
     multiheadattn = MultiHeadAttention(d_model=d_model, num_heads=num_heads, max_seq_length=max_seq_len, theta=theta)
-    multiheadattn.W_QKV.weight.data = torch.concat([q_proj_weight, k_proj_weight, v_proj_weight], dim=0)
+    # multiheadattn.W_QKV.weight.data = torch.concat([q_proj_weight, k_proj_weight, v_proj_weight], dim=0)
+    multiheadattn.W_Q.weight.data = q_proj_weight
+    multiheadattn.W_K.weight.data = k_proj_weight
+    multiheadattn.W_V.weight.data = v_proj_weight
     multiheadattn.W_O.weight.data = o_proj_weight
     return multiheadattn.forward(in_features, token_positions=token_positions)
     # raise NotImplementedError
@@ -298,7 +304,11 @@ def run_transformer_block(
     """
     from cs336_basics.nn import transformer_block
     TransformerBlock = transformer_block(d_model=d_model, num_heads=num_heads, d_ff=d_ff, max_seq_length=max_seq_len, theta=theta)
-    TransformerBlock.MHA.W_QKV.weight.data = torch.cat((weights["attn.q_proj.weight"], weights["attn.k_proj.weight"], weights["attn.v_proj.weight"]), dim=0)
+    # TransformerBlock.MHA.W_QKV.weight.data = torch.cat((weights["attn.q_proj.weight"], weights["attn.k_proj.weight"], weights["attn.v_proj.weight"]), dim=0)
+    TransformerBlock.MHA.W_Q.weight.data = weights["attn.q_proj.weight"]
+    TransformerBlock.MHA.W_K.weight.data = weights["attn.k_proj.weight"]
+    TransformerBlock.MHA.W_V.weight.data = weights["attn.v_proj.weight"]
+    
     TransformerBlock.MHA.W_O.weight.data = weights["attn.output_proj.weight"]
     TransformerBlock.FFN.w1.weight.data = weights["ffn.w1.weight"]
     TransformerBlock.FFN.w2.weight.data = weights["ffn.w2.weight"]
@@ -387,12 +397,15 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-    from cs336_basics.nn import transfoer_lm
-    TransformerLM = transfoer_lm(d_model=d_model,num_heads=num_heads,vocab_size=vocab_size,context_length=context_length,num_layers=num_layers, d_ff=d_ff,theta=rope_theta)
+    from cs336_basics.nn import tranformer_lm
+    TransformerLM = tranformer_lm(d_model=d_model,num_heads=num_heads,vocab_size=vocab_size,context_length=context_length,num_layers=num_layers, d_ff=d_ff,theta=rope_theta)
     TransformerLM.embedding.param.data = weights["token_embeddings.weight"]
     for num_layer in range(num_layers):
         # TransformerBlock = transformer.transformer_block(d_model=d_model,d_ff=d_ff, num_heads=num_heads, max_seq_length=context_length, theta=rope_theta)
-        TransformerLM.layers[num_layer].MHA.W_QKV.weight.data = torch.cat((weights[f"layers.{num_layer}.attn.q_proj.weight"], weights[f"layers.{num_layer}.attn.k_proj.weight"], weights[f"layers.{num_layer}.attn.v_proj.weight"]), dim=0)
+        TransformerLM.layers[num_layer].MHA.W_Q.weight.data = weights[f"layers.{num_layer}.attn.q_proj.weight"]
+        TransformerLM.layers[num_layer].MHA.W_K.weight.data = weights[f"layers.{num_layer}.attn.k_proj.weight"] # weights["attn.k_proj.weight"]
+        TransformerLM.layers[num_layer].MHA.W_V.weight.data = weights[f"layers.{num_layer}.attn.v_proj.weight"] # weights["attn.v_proj.weight"]
+        # TransformerLM.layers[num_layer].MHA.W_QKV.weight.data = torch.cat((weights[f"layers.{num_layer}.attn.q_proj.weight"], weights[f"layers.{num_layer}.attn.k_proj.weight"], weights[f"layers.{num_layer}.attn.v_proj.weight"]), dim=0)
         TransformerLM.layers[num_layer].MHA.W_O.weight.data = weights[f"layers.{num_layer}.attn.output_proj.weight"]
         TransformerLM.layers[num_layer].FFN.w1.weight.data = weights[f"layers.{num_layer}.ffn.w1.weight"]
         TransformerLM.layers[num_layer].FFN.w2.weight.data = weights[f"layers.{num_layer}.ffn.w2.weight"]
@@ -516,7 +529,8 @@ def run_gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_l2_norm:
 
     The gradients of the parameters (parameter.grad) should be modified in-place.
     """
-    raise NotImplementedError
+    from cs336_basics.optimizer import gradient_clipping
+    gradient_clipping(parameters, max_l2_norm)
 
 
 def get_adamw_cls() -> Any:
@@ -656,3 +670,5 @@ def run_train_bpe(
     vocab, merges = tokenizer.train(input_path, vocab_size, special_tokens, **kwargs,)
     # vocab, merges = tokenizer.forward()
     return vocab, merges    
+
+
