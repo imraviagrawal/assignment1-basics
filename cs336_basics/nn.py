@@ -62,95 +62,134 @@ class PositionwiseFeedForward(nn.Module):
         w_3x = self.w3.forward(x) # d_model, d_ff
         return self.w2.forward(silu(w_1x)*w_3x)
 
-class Rope(nn.Module):
-    def __init__(self, theta, d_k, max_seq_len, device=None):
-        super().__init__()
-        self.theta = theta
-        self.d_k = d_k
-        self.max_seq_len = max_seq_len
+# class Rope(nn.Module):
+#     def __init__(self, theta, d_k, max_seq_len, device=None):
+#         super().__init__()
+#         self.theta = theta
+#         self.d_k = d_k
+#         self.max_seq_len = max_seq_len
 
 
-        if self.theta != 0:
-            i_vec = torch.arange(max_seq_len, device=device)[:, None]
-            k_vec = torch.arange(d_k//2, device=device)[None, :]
+#         if self.theta != 0:
+#             i_vec = torch.arange(max_seq_len, device=device)[:, None]
+#             k_vec = torch.arange(d_k//2, device=device)[None, :]
 
-            thetas = i_vec / theta ** (2*k_vec/d_k)
-            R = torch.stack((thetas.cos(), thetas.sin()))
+#             thetas = i_vec / theta ** (2*k_vec/d_k)
+#             R = torch.stack((thetas.cos(), thetas.sin()))
 
-            R = R.to(device=device)
-            self.register_buffer("R", R, persistent=False)
+#             R = R.to(device=device)
+#             self.register_buffer("R", R, persistent=False)
 
-    def forward(self, x: torch.Tensor, token_positions: torch.Tensor) -> torch.Tensor:
-        # basic Version 
-        if self.theta == 0:
-            return x
+#     def forward(self, x: torch.Tensor, token_positions: torch.Tensor) -> torch.Tensor:
+#         # basic Version 
+#         if self.theta == 0:
+#             return x
         
-        seq_len = x.shape[-2] # last dim, (batch, seq, token id)
-        if token_positions is None:
-            even = x[..., ::2]
-            odd = x[..., 1::2]
-            c = self.R[0, :seq_len ,...]
-            s = self.R[1, :seq_len ,...]
-            tmp = even*s + odd*c
-            x[..., ::2] = even*c - odd*s
-            x[..., 1::2] = tmp
+#         seq_len = x.shape[-2] # last dim, (batch, seq, token id)
+#         if token_positions is None:
+#             even = x[..., ::2]
+#             odd = x[..., 1::2]
+#             c = self.R[0, :seq_len ,...]
+#             s = self.R[1, :seq_len ,...]
+#             tmp = even*s + odd*c
+#             x[..., ::2] = even*c - odd*s
+#             x[..., 1::2] = tmp
 
-        else:
-            even = x[..., token_positions, ::2]
-            odd = x[..., token_positions, 1::2]
+#         else:
+#             even = x[..., token_positions, ::2]
+#             odd = x[..., token_positions, 1::2]
 
-            c = self.R[0, token_positions, ...]
-            s = self.R[1, token_positions, ...]
-            tmp = even*s + odd*c
-            x[...,token_positions,::2] = even * c - odd *s
-            x[..., token_positions, 1::2] = tmp
-        return x
+#             c = self.R[0, token_positions, ...]
+#             s = self.R[1, token_positions, ...]
+#             tmp = even*s + odd*c
+#             x[...,token_positions,::2] = even * c - odd *s
+#             x[..., token_positions, 1::2] = tmp
+        # return x
 import torch
 import torch.nn as nn
 
-class Rope(nn.Module): 
+# class Rope(nn.Module): 
 
+#     def __init__(self, theta: float, d_k: int, max_seq_len: int, device=None):
+#         super().__init__()
+#         self.theta = theta
+#         # self.token_positions_default = torch.arrange(max_seq_len, device=device)
+#         if theta != 0:
+#             i_vec = torch.arange(max_seq_len, device=device)[:, None]
+#             k_vec = torch.arange(d_k//2, device=device)[None, :]
+#             thetas = i_vec / theta ** (2*k_vec/d_k)
+#             # Typo in the assignment. There it says that k in {1, ..., d/2}.
+#             # Can either view as sin/cos or as complex
+#             R = torch.stack((thetas.cos(), thetas.sin()))
+#             # Complex version: 
+#             # R = torch.polar(torch.ones_like(thetas), thetas)
+#             R.to(device=device)
+#             self.register_buffer("R", R, persistent=False)
+#     def forward(self, x: torch.Tensor, token_positions: torch.Tensor) -> torch.Tensor: 
+#         # Basic version
+#         if self.theta == 0:
+#             return  x
+    
+#         seq_len = x.shape[-2]
+#         if token_positions is None:
+#             even = x[...,::2]
+#             odd = x[...,1::2]
+#             c = self.R[0, :seq_len,...]
+#             s = self.R[1,:seq_len,...] 
+#             tmp = even * s + odd * c      
+#             x[...,::2] = even * c - odd *s
+#             x[...,1::2] = tmp
+#         else:
+#             even = x[...,token_positions,::2]
+#             odd = x[...,token_positions,1::2]
+#             c = self.R[0,token_positions, ...]
+#             s = self.R[1,token_positions,...] 
+#             tmp = even * s + odd * c      
+#             x[...,token_positions,::2] = even * c - odd *s
+#             x[...,token_positions,1::2] = tmp        
+#         return x
+
+class Rope(nn.Module): 
     def __init__(self, theta: float, d_k: int, max_seq_len: int, device=None):
         super().__init__()
+
         self.theta = theta
-        # self.token_positions_default = torch.arrange(max_seq_len, device=device)
         if theta != 0:
+            # thetas = i_vec / theta ** (2*k_vec/d_k) # i_vec (max_len, None), and k_vec (None, d_k//2)
             i_vec = torch.arange(max_seq_len, device=device)[:, None]
             k_vec = torch.arange(d_k//2, device=device)[None, :]
-            thetas = i_vec / theta ** (2*k_vec/d_k)
-            # Typo in the assignment. There it says that k in {1, ..., d/2}.
-            # Can either view as sin/cos or as complex
-            R = torch.stack((thetas.cos(), thetas.sin()))
-            # Complex version: 
-            # R = torch.polar(torch.ones_like(thetas), thetas)
-            R.to(device=device)
+            thetas = i_vec / theta**(2*k_vec/d_k)
+            R = torch.stack([thetas.cos(), thetas.sin()])
+            R = R.to(device)
             self.register_buffer("R", R, persistent=False)
 
-
-
-    def forward(self, x: torch.Tensor, token_positions: torch.Tensor) -> torch.Tensor: 
-        # Basic version
+    def forward(self, X, token_positions=None):
+        # X: (b, h, s, d_k)
+        # token_position: (b, s)
+        # no theta
+        # R [[cos -sin], [sin cos]]
         if self.theta == 0:
-            return  x
-    
-        seq_len = x.shape[-2]
+            return X
+        
+        # token position is None 
+        seq_len = X.shape[-2]
+        # # R [[cos -sin], [sin cos]]
         if token_positions is None:
-            even = x[...,::2]
-            odd = x[...,1::2]
-            c = self.R[0, :seq_len,...]
-            s = self.R[1,:seq_len,...] 
-            tmp = even * s + odd * c      
-            x[...,::2] = even * c - odd *s
-            x[...,1::2] = tmp
+            even = X[..., :seq_len, ::2]
+            odd = X[..., :seq_len, 1::2]
+            cos = self.R[0, :seq_len, :] # (s, d_k/2)
+            sin = self.R[1, :seq_len, :] # (s, d_k/2)
+            X[..., :seq_len, ::2] = cos*even - sin*odd
+            X[..., :seq_len, 1::2] = sin*even + cos*odd
         else:
-            even = x[...,token_positions,::2]
-            odd = x[...,token_positions,1::2]
-            c = self.R[0,token_positions, ...]
-            s = self.R[1,token_positions,...] 
-            tmp = even * s + odd * c      
-            x[...,token_positions,::2] = even * c - odd *s
-            x[...,token_positions,1::2] = tmp        
-        return x
+            even = X[..., token_positions, ::2]
+            odd = X[..., token_positions, 1::2]
+            cos = self.R[0, token_positions, :] # (s, d_k/2)
+            sin = self.R[1, token_positions, :] # (s, d_k/2)
+            X[..., token_positions, ::2] = cos*even - sin*odd
+            X[..., token_positions, 1::2] = sin*even + cos*odd
+        return X
+
 
 class Softmax(nn.Module):
     def __init__(self, dim=-1):
@@ -606,23 +645,23 @@ class GatingNetwork(nn.Module):
     def forward(self, X):
         return F.softmax(self.gate(X), dim=-1)
     
-class MoELayer(nn.Module):
-    def __init__(self, in_dim, hidden_dim, out_dim, num_expert):
-        super().__init__()
-        self.experts = nn.ModuleList([Expert(in_dim, hidden_dim, out_dim) for _ in num_expert])
-        self.gate = GatingNetwork(in_dim, num_expert)
+# class MoELayer(nn.Module):
+#     def __init__(self, in_dim, hidden_dim, out_dim, num_expert):
+#         super().__init__()
+#         self.experts = nn.ModuleList([Expert(in_dim, hidden_dim, out_dim) for _ in num_expert])
+#         self.gate = GatingNetwork(in_dim, num_expert)
 
-    # expert choice and token choice change 
-    def forward(self, X, num_experts_per_tok):
-        gating_scores = self.gate(X)
-        topk_vals, topk_idx = gating_scores.topk(num_experts_per_tok, dim=-1)
-        mask = torch.zeros_like(gating_scores).scatter_(dim=-1, topk_idx, 1) # add 1 in indices 
-        gating_scores = gating_scores*mask
-        gating_scores = F.normalize(gating_scores, p=1, dim=-1)
-        expert_outputs = torch.stack([expert(X) for expert in self.experts], dim=1)
-        expert_outputs = expert_outputs.transpose(1, 2)
-        output = torch.einsum('bte,bteo->bto', gating_scores, expert_outputs)
-        return output
+#     # expert choice and token choice change 
+#     def forward(self, X, num_experts_per_tok):
+#         gating_scores = self.gate(X)
+#         topk_vals, topk_idx = gating_scores.topk(num_experts_per_tok, dim=-1)
+#         mask = torch.zeros_like(gating_scores).scatter_(dim=-1, topk_idx, 1) # add 1 in indices 
+#         gating_scores = gating_scores*mask
+#         gating_scores = F.normalize(gating_scores, p=1, dim=-1)
+#         expert_outputs = torch.stack([expert(X) for expert in self.experts], dim=1)
+#         expert_outputs = expert_outputs.transpose(1, 2)
+#         output = torch.einsum('bte,bteo->bto', gating_scores, expert_outputs)
+#         return output
 
 
 class TransformersMoe(nn.Module):
