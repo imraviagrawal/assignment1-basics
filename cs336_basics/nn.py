@@ -47,20 +47,35 @@ class RMSnorm(nn.Module):
 def silu(param: torch.Tensor): 
     return param*torch.sigmoid(param) # implement
 
+# class PositionwiseFeedForward(nn.Module):
+#     def __init__(self, d_model, d_ff = None, device=None, dtype=None):
+#         super().__init__()
+#         self.d_model = d_model
+#         if d_ff == None:
+#             d_ff = int(np.ceil(8*d_model // 3 / 64) * 64)
+#         self.w1 = Linear(in_features=d_model, out_features=d_ff, device=device, dtype=dtype)
+#         self.w2 = Linear(in_features=d_ff, out_features=d_model, device=device, dtype=dtype)
+#         self.w3 = Linear(in_features=d_model, out_features=d_ff, device=device, dtype=dtype)
+    
+#     def forward(self, x: torch.Tensor) -> torch.Tensor: 
+#         w_1x = self.w1.forward(x) # d_model, d_ff
+#         w_3x = self.w3.forward(x) # d_model, d_ff
+#         return self.w2.forward(silu(w_1x)*w_3x)
+
 class PositionwiseFeedForward(nn.Module):
     def __init__(self, d_model, d_ff = None, device=None, dtype=None):
         super().__init__()
         self.d_model = d_model
         if d_ff == None:
-            d_ff = int(np.ceil(8*d_model // 3 / 64) * 64)
-        self.w1 = Linear(in_features=d_model, out_features=d_ff, device=device, dtype=dtype)
-        self.w2 = Linear(in_features=d_ff, out_features=d_model, device=device, dtype=dtype)
-        self.w3 = Linear(in_features=d_model, out_features=d_ff, device=device, dtype=dtype)
-    
-    def forward(self, x: torch.Tensor) -> torch.Tensor: 
-        w_1x = self.w1.forward(x) # d_model, d_ff
-        w_3x = self.w3.forward(x) # d_model, d_ff
-        return self.w2.forward(silu(w_1x)*w_3x)
+            d_ff = int(np.ceil(8*d_model//3/64)*64)
+        self.w1 = Linear(d_ff, d_model, device=device, dtype=dtype)
+        self.w3 = Linear(d_ff, d_model, device=device, dtype=dtype)
+        self.w2 = Linear(d_model, d_ff, device=device, dtype=dtype)
+
+    def forward(self, X):
+        w_1x = self.w1(X)
+        w_3x = self.w3(X)
+        return self.w2((w_1x*F.sigmoid(w_1x))*w_3x)
 
 # class Rope(nn.Module):
 #     def __init__(self, theta, d_k, max_seq_len, device=None):
@@ -108,46 +123,46 @@ class PositionwiseFeedForward(nn.Module):
 import torch
 import torch.nn as nn
 
-# class Rope(nn.Module): 
+class Rope(nn.Module): 
 
-#     def __init__(self, theta: float, d_k: int, max_seq_len: int, device=None):
-#         super().__init__()
-#         self.theta = theta
-#         # self.token_positions_default = torch.arrange(max_seq_len, device=device)
-#         if theta != 0:
-#             i_vec = torch.arange(max_seq_len, device=device)[:, None]
-#             k_vec = torch.arange(d_k//2, device=device)[None, :]
-#             thetas = i_vec / theta ** (2*k_vec/d_k)
-#             # Typo in the assignment. There it says that k in {1, ..., d/2}.
-#             # Can either view as sin/cos or as complex
-#             R = torch.stack((thetas.cos(), thetas.sin()))
-#             # Complex version: 
-#             # R = torch.polar(torch.ones_like(thetas), thetas)
-#             R.to(device=device)
-#             self.register_buffer("R", R, persistent=False)
-#     def forward(self, x: torch.Tensor, token_positions: torch.Tensor) -> torch.Tensor: 
-#         # Basic version
-#         if self.theta == 0:
-#             return  x
+    def __init__(self, theta: float, d_k: int, max_seq_len: int, device=None):
+        super().__init__()
+        self.theta = theta
+        # self.token_positions_default = torch.arrange(max_seq_len, device=device)
+        if theta != 0:
+            i_vec = torch.arange(max_seq_len, device=device)[:, None]
+            k_vec = torch.arange(d_k//2, device=device)[None, :]
+            thetas = i_vec / theta ** (2*k_vec/d_k)
+            # Typo in the assignment. There it says that k in {1, ..., d/2}.
+            # Can either view as sin/cos or as complex
+            R = torch.stack((thetas.cos(), thetas.sin()))
+            # Complex version: 
+            # R = torch.polar(torch.ones_like(thetas), thetas)
+            R.to(device=device)
+            self.register_buffer("R", R, persistent=False)
+    def forward(self, x: torch.Tensor, token_positions: torch.Tensor) -> torch.Tensor: 
+        # Basic version
+        if self.theta == 0:
+            return  x
     
-#         seq_len = x.shape[-2]
-#         if token_positions is None:
-#             even = x[...,::2]
-#             odd = x[...,1::2]
-#             c = self.R[0, :seq_len,...]
-#             s = self.R[1,:seq_len,...] 
-#             tmp = even * s + odd * c      
-#             x[...,::2] = even * c - odd *s
-#             x[...,1::2] = tmp
-#         else:
-#             even = x[...,token_positions,::2]
-#             odd = x[...,token_positions,1::2]
-#             c = self.R[0,token_positions, ...]
-#             s = self.R[1,token_positions,...] 
-#             tmp = even * s + odd * c      
-#             x[...,token_positions,::2] = even * c - odd *s
-#             x[...,token_positions,1::2] = tmp        
-#         return x
+        seq_len = x.shape[-2]
+        if token_positions is None:
+            even = x[...,::2]
+            odd = x[...,1::2]
+            c = self.R[0, :seq_len,...]
+            s = self.R[1,:seq_len,...] 
+            tmp = even * s + odd * c      
+            x[...,::2] = even * c - odd *s
+            x[...,1::2] = tmp
+        else:
+            even = x[...,token_positions,::2]
+            odd = x[...,token_positions,1::2]
+            c = self.R[0,token_positions, ...]
+            s = self.R[1,token_positions,...] 
+            tmp = even * s + odd * c      
+            x[...,token_positions,::2] = even * c - odd *s
+            x[...,token_positions,1::2] = tmp        
+        return x
 
 class Rope(nn.Module): 
     def __init__(self, theta: float, d_k: int, max_seq_len: int, device=None):
@@ -158,7 +173,7 @@ class Rope(nn.Module):
             # thetas = i_vec / theta ** (2*k_vec/d_k) # i_vec (max_len, None), and k_vec (None, d_k//2)
             i_vec = torch.arange(max_seq_len, device=device)[:, None]
             k_vec = torch.arange(d_k//2, device=device)[None, :]
-            thetas = i_vec / theta**(2*k_vec/d_k)
+            thetas = i_vec / theta**((2*k_vec)/d_k)
             R = torch.stack([thetas.cos(), thetas.sin()])
             R = R.to(device)
             self.register_buffer("R", R, persistent=False)
@@ -179,15 +194,17 @@ class Rope(nn.Module):
             odd = X[..., :seq_len, 1::2]
             cos = self.R[0, :seq_len, :] # (s, d_k/2)
             sin = self.R[1, :seq_len, :] # (s, d_k/2)
+            tmp = sin*even + cos*odd
             X[..., :seq_len, ::2] = cos*even - sin*odd
-            X[..., :seq_len, 1::2] = sin*even + cos*odd
+            X[..., :seq_len, 1::2] = tmp
         else:
             even = X[..., token_positions, ::2]
             odd = X[..., token_positions, 1::2]
             cos = self.R[0, token_positions, :] # (s, d_k/2)
             sin = self.R[1, token_positions, :] # (s, d_k/2)
-            X[..., token_positions, ::2] = cos*even - sin*odd
-            X[..., token_positions, 1::2] = sin*even + cos*odd
+            tmp = sin*even + cos*odd
+            X[..., token_positions, ::2] = cos*even - sin*odd # this will change odd postiions, so we need to store the results
+            X[..., token_positions, 1::2] = tmp
         return X
 
 
@@ -233,40 +250,56 @@ def softmax(x, dim = -1):
         
         return out.to(orig_dtype) # exp(x) / sum(exp(x)), may be need broadcase
 
-# def scaled_dot_product_attention(Q:torch.Tensor, K: torch.Tensor, V, mask = None):
-#     d_k = Q.shape[-1]
-#     QKT = einops.einsum(Q, K, "... queries d_k, ... keys d_k -> ... queries keys")
-#     QKT.div_(np.sqrt(d_k)) # inplace
-#     softmax_dim = len(QKT.shape) - 1
-#     seq_length = Q.shape[-2]
-#     if mask is not None:
-#         result = torch.where(mask[:seq_length,:seq_length],
-#         0,
-#         -float('inf'))
-#         A = softmax(QKT + result,dim = softmax_dim)
-#     else: 
-#         A = softmax(QKT,dim = softmax_dim)
-#     # print(A.shape, V.shape)
-#     # print(einops.einsum(A, V, "... crud seq_length, ... seq_length d_v -> ... crud d_v").shape)
-#     return einops.einsum(A, V, "... crud seq_length, ... seq_length d_v -> ... crud d_v")
-
-def scaled_dot_product_attention(Q:torch.Tensor, K: torch.Tensor, V: torch.Tensor, mask = None):
+def scaled_dot_product_attention(Q:torch.Tensor, K: torch.Tensor, V, mask = None):
     d_k = Q.shape[-1]
-    # print(Q.shape, K.shape)
-    QKT = einops.einsum(Q, K, "... q d_k, ... k d_k -> ... q k")
-    # print(QKT.shape)
-    QKT.div_(np.sqrt(d_k))
-
-    softmax_dim = len(Q.shape) - 1 
-    seq_len = Q.shape[-2] # seq len
-
+    QKT = einops.einsum(Q, K, "... queries d_k, ... keys d_k -> ... queries keys")
+    QKT.div_(np.sqrt(d_k)) # inplace
+    softmax_dim = len(QKT.shape) - 1
+    seq_length = Q.shape[-2]
     if mask is not None:
-        QKT.masked_fill_(~mask[:seq_len, :seq_len], -float("inf")) # fil true to false
-    
-    A = softmax(QKT, dim=softmax_dim)
+        result = torch.where(mask[:seq_length,:seq_length],
+        0,
+        -float('inf'))
+        A = softmax(QKT + result,dim = softmax_dim)
+    else: 
+        A = softmax(QKT,dim = softmax_dim)
     # print(A.shape, V.shape)
-    return einops.einsum(A, V, "... k s, ... s d_v -> ... k d_v")
+    # print(einops.einsum(A, V, "... crud seq_length, ... seq_length d_v -> ... crud d_v").shape)
+    return einops.einsum(A, V, "... crud seq_length, ... seq_length d_v -> ... crud d_v")
+
+# def scaled_dot_product_attention(Q:torch.Tensor, K: torch.Tensor, V: torch.Tensor, mask = None):
+#     d_k = Q.shape[-1]
+#     # print(Q.shape, K.shape)
+#     QKT = einops.einsum(Q, K, "... q d_k, ... k d_k -> ... q k")
+#     # print(QKT.shape)
+#     QKT.div_(np.sqrt(d_k))
+
+#     softmax_dim = len(Q.shape) - 1 
+#     seq_len = Q.shape[-2] # seq len
+
+#     if mask is not None:
+#         QKT.masked_fill_(~mask[:seq_len, :seq_len], -float("inf")) # fil true to false
+    
+#     A = softmax(QKT, dim=softmax_dim)
+#     # print(A.shape, V.shape)
+#     return einops.einsum(A, V, "... k s, ... s d_v -> ... k d_v")
     # return torch.matmul(A, V.T(-2, -1))
+
+# def scaled_dot_product_attention(Q:torch.Tensor, K: torch.Tensor, V: torch.Tensor, mask = None):
+#     # Softmax(QK/sqrt(d_k))V
+#     # Q, K : B, N, S, d_k
+#     # V = B, N, S, d_v
+#     d_k = Q.shape[-1]
+#     QKT = torch.matmul(Q, K.transpose(-1, -2)) # 
+#     # QKT = einops.einsum(Q, K, "... q d_k, ... k d_k -> ... q k")
+#     QKT.div_(np.sqrt(d_k))
+#     seq_len = Q.shape[-2]
+#     if mask is not None: 
+#         QKT.masked_fill_(~mask[:seq_len, :seq_len], -float("inf")) # fill with inf value for false
+#     attn = softmax(QKT, dim=-1)
+#     # print(attn.shape, V.transpose(-2, -1).shape)
+#     return torch.matmul(attn, V)
+
 
 
 # class MultiHeadAttention(nn.Module):
@@ -348,47 +381,47 @@ def scaled_dot_product_attention(Q:torch.Tensor, K: torch.Tensor, V: torch.Tenso
 
 #         return self.W_O(attn_out)
 
-class MultiHeadAttention(nn.Module):
-    def __init__(self, d_model: int, num_heads, max_seq_length=None, theta=None, device=None, dtype=None, num_kv_heads=None):
-        super().__init__()
-        self.num_heads = num_heads
-        if num_kv_heads is None: 
-            num_kv_heads = 1
-        self.num_kv_heads = num_kv_heads
-        assert d_model % num_heads == 0, "Not divisible d_model and num_heads"
-        assert num_heads % num_kv_heads == 0, "heads not divisible, fix it dum dum"
-        self.d_k = d_model // num_heads
-        self.d_model = d_model
-        self.kv_dim = self.d_k * num_kv_heads # d_model / num_heads / num_kv_heads
-        self.W_Q = Linear(d_model, d_model, device=device, dtype=dtype)
-        self.W_K = Linear(d_model, self.kv_dim, device=device, dtype=dtype)
-        self.W_V = Linear(d_model, self.kv_dim, device=device, dtype=dtype)
-        self.W_O = Linear(d_model, d_model, device=device, dtype=dtype)
-        self.R = Rope(theta=theta, max_seq_len=max_seq_length, d_k=self.d_k, device=device)
-        self.cmask = torch.ones((max_seq_length, max_seq_length), dtype=torch.bool, device=device).tril()
+# class MultiHeadAttention(nn.Module):
+#     def __init__(self, d_model: int, num_heads, max_seq_length=None, theta=None, device=None, dtype=None, num_kv_heads=None):
+#         super().__init__()
+#         self.num_heads = num_heads
+#         if num_kv_heads is None: 
+#             num_kv_heads = 1
+#         self.num_kv_heads = num_kv_heads
+#         assert d_model % num_heads == 0, "Not divisible d_model and num_heads"
+#         assert num_heads % num_kv_heads == 0, "heads not divisible, fix it dum dum"
+#         self.d_k = d_model // num_heads
+#         self.d_model = d_model
+#         self.kv_dim = self.d_k * num_kv_heads # d_model / num_heads / num_kv_heads
+#         self.W_Q = Linear(d_model, d_model, device=device, dtype=dtype)
+#         self.W_K = Linear(d_model, self.kv_dim, device=device, dtype=dtype)
+#         self.W_V = Linear(d_model, self.kv_dim, device=device, dtype=dtype)
+#         self.W_O = Linear(d_model, d_model, device=device, dtype=dtype)
+#         self.R = Rope(theta=theta, max_seq_len=max_seq_length, d_k=self.d_k, device=device)
+#         self.cmask = torch.ones((max_seq_length, max_seq_length), dtype=torch.bool, device=device).tril()
 
-    def forward(self, X, token_positions=None):
-        b, s, _ = X.shape
+#     def forward(self, X, token_positions=None):
+#         b, s, _ = X.shape
 
-        Q = self.W_Q(X).view(b, s, self.num_heads, self.d_k).transpose(1, 2) # (b, num_heads, seq, d_k)
-        K = self.W_K(X).view(b, s, self.num_kv_heads, self.d_k).transpose(1, 2) # (b, kv_head, seq, d_k)
-        V = self.W_V(X).view(b, s, self.num_kv_heads, self.d_k).transpose(1, 2) # (b, kv_head, seq, d_k)
+#         Q = self.W_Q(X).view(b, s, self.num_heads, self.d_k).transpose(1, 2) # (b, num_heads, seq, d_k)
+#         K = self.W_K(X).view(b, s, self.num_kv_heads, self.d_k).transpose(1, 2) # (b, kv_head, seq, d_k)
+#         V = self.W_V(X).view(b, s, self.num_kv_heads, self.d_k).transpose(1, 2) # (b, kv_head, seq, d_k)
 
-        Q = self.R(Q, token_positions=token_positions)
-        K = self.R(K, token_positions=token_positions)
+#         Q = self.R(Q, token_positions=token_positions)
+#         K = self.R(K, token_positions=token_positions)
 
-        if self.num_heads != self.num_kv_heads:
-            repeat_factor = self.num_heads // self.num_kv_heads
-            K = K.repeat_interleave(repeat_factor, dim=1)
-            V = V.repeat_interleave(repeat_factor, dim=1)
+#         if self.num_heads != self.num_kv_heads:
+#             repeat_factor = self.num_heads // self.num_kv_heads
+#             K = K.repeat_interleave(repeat_factor, dim=1)
+#             V = V.repeat_interleave(repeat_factor, dim=1)
         
-        # scaled dot product 
-        attn = scaled_dot_product_attention(Q, K, V, mask=self.cmask)
+#         # scaled dot product 
+#         attn = scaled_dot_product_attention(Q, K, V, mask=self.cmask)
 
-        # merge head
-        attn = attn.transpose(1, 2).contiguous().view(b, s, self.d_model)
+#         # merge head
+#         attn = attn.transpose(1, 2).contiguous().view(b, s, self.d_model)
 
-        return self.W_O(attn)
+#         return self.W_O(attn)
 
 class MultiHeadAttention(nn.Module):
     def __init__(self, d_model:int, num_heads:int, num_kv_heads:int=None, 
@@ -468,6 +501,55 @@ class MultiHeadAttention(nn.Module):
 #         out = self.W_O(val)
 #         return out
 
+# class MultiHeadAttention(nn.Module):
+    # def __init__(self, d_model:int, num_heads:int, num_kv_heads:int=None, 
+    #              max_seq_length=None, theta=None, device=None, dtype=None):
+    #     super().__init__()
+    #     self.d_model = d_model
+    #     self.num_heads = num_heads
+    #     self.num_kv_heads = num_kv_heads if num_kv_heads is not None else num_heads
+    #     self.max_seq_length = max_seq_length
+    #     self.theta = theta 
+    #     assert d_model%self.num_heads == 0, "d_model and num_haeds are not divisible"
+    #     self.d_k = self.d_model//self.num_heads
+    #     self.R = Rope(self.theta, d_k=self.d_k, max_seq_len=self.max_seq_length)
+    #     self.W_Q = Linear(d_model, self.d_k*num_heads, device=device, dtype=dtype)
+    #     self.W_K = Linear(d_model, self.d_k*self.num_kv_heads, device=device, dtype=dtype)
+    #     self.W_V = Linear(d_model, self.d_k*self.num_kv_heads, device=device, dtype=dtype)
+    #     self.W_O = Linear(d_model, d_model, device=device, dtype=dtype)
+    #     self.cmask = torch.ones((max_seq_length, max_seq_length), dtype=torch.bool, device=device).tril() # [lower triangle mask next token prediction]
+
+    # def forward(self, X, token_positions=None):
+    #     b, s, _ = X.shape
+
+    #     WQ = self.W_Q(X).view(b, s, self.num_heads, self.d_k).transpose(1, 2)
+    #     WK = self.W_K(X).view(b, s, self.num_kv_heads, self.d_k).transpose(1, 2)
+    #     WV = self.W_V(X).view(b, s, self.num_kv_heads, self.d_k).transpose(1, 2)
+        
+    #     WQ = self.R(WQ, token_positions=token_positions)
+    #     WK = self.R(WK, token_positions=token_positions)
+
+    #     if self.num_heads != self.num_kv_heads:
+    #         repeat_factor = self.num_heads // self.num_kv_heads
+    #         WK = torch.repeat_interleave(WK, repeats=repeat_factor, dim=1) # repeat on head dim
+    #         WV = torch.repeat_interleave(WV, repeats=repeat_factor, dim=1)
+
+    #     attn = scaled_dot_product_attention(WQ, WK, WV, self.cmask) # (b, h, s, d_k)
+    #     out = attn.transpose(1, 2).contiguous().view(b, s, self.d_model)
+    #     out = self.W_O(out)
+    #     return out
+
+
+# class transformer_block(nn.Module):
+#     def __init__(self, d_model, num_heads, d_ff, max_seq_length=None, theta=None, device=None, dtype=None):
+#         super().__init__()
+#         self.MHA = MultiHeadAttention(d_model, num_heads, max_seq_length=max_seq_length, theta=theta, dtype=dtype, device=device)
+#         self.FFN = PositionwiseFeedForward(d_model, d_ff, device=device, dtype=dtype)
+#         self.RMSNorm1 = RMSnorm(d_model, device=device, dtype=dtype)
+#         self.RMSNorm2 = RMSnorm(d_model, device=device, dtype=dtype)
+#     def forward(self, X):
+#         Y = self.MHA(self.RMSNorm1(X)) + X
+#         return self.FFN(self.RMSNorm2(Y)) + Y
 
 class transformer_block(nn.Module):
     def __init__(self, d_model:int, num_heads:int, d_ff:int = None, max_seq_length:int = None, theta:int = None, pre_RMS = True, post_RMS = False, activation = "", device=None, dtype=None):
@@ -522,6 +604,25 @@ class transformer_block(nn.Module):
 #             Z = Y + self.FFN(Y)
 #             return Z
         
+class tranformer_lm(nn.Module):
+    def __init__(self, d_model, num_heads, vocab_size, context_length, num_layers, d_ff, theta, pre_RMS=True, post_RMS=False, activation='', device=None, dtype=None):
+        super().__init__()
+        self.embedding = Embedding(num_embeddings=vocab_size, embedding_dim=d_model, device=device, dtype=dtype)
+        self.layers = nn.ModuleList()
+        for _ in range(num_layers):
+            tb = transformer_block(d_model, num_heads, d_ff, max_seq_length=context_length, theta=theta, device=device, dtype=dtype)
+            self.layers.append(tb)
+        self.final_RMSNorm = RMSnorm(d_model=d_modal, device=device, dtype=dtype)
+        self.output_layer = Linear(out_features=vocab_size, in_features=d_model, device=device, dtype=dtype)
+    def forward(self, X):
+        X = self.embedding(X)
+        for layer in self.layers:
+            X = layer(X)
+        X = self.final_RMSNorm(X)
+        out = self.output_layer(X)
+        return out
+
+
 
 class tranformer_lm(nn.Module):
     def __init__(self, d_model, num_heads, vocab_size, context_length, num_layers, d_ff, theta, pre_RMS=True, post_RMS=False, activation='', device=None, dtype=None):
@@ -683,3 +784,6 @@ class TransformersMoe(nn.Module):
         X = self.moe_layer(X)
         logits = self.output_layer(X)
         return logits
+    
+
+
