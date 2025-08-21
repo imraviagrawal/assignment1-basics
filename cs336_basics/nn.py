@@ -672,6 +672,42 @@ class tranformer_lm(nn.Module):
         
 
 def cross_entropy_loss(logits, targets):
+    """
+    logits: (..., c)
+    targets: (...)
+
+    -sum(log(softmax(logits)))
+    """
+    logits = logits.reshape(-1, logits.shape[-1])
+    targets = targets.reshape(-1, 1)
+
+    # Numerical stable from large value 
+    max_vals, _ = torch.max(logits, dim=-1, keepdim=True) # b*s, c
+    logits_shifted = logits - max_vals # b*s, c
+
+    # log_sum_exp = torch.log(torch.sum(torch.exp(logits_shifted), dim=-1, keepdim=True))
+    log_sum_exp = torch.logsumexp(logits_shifted, dim=-1, keepdim=True)
+    log_probs = logits_shifted - log_sum_exp
+
+    # gather correct probs 
+    correct_probs = log_probs.gather(1, targets)
+    return -correct_probs.mean()
+
+
+    # logits = logits.reshape(-1, logits.size(-1)) #(b*s, C)
+    # targets = targets.reshape(-1) # (B, C)
+
+    # max_vals, _ = torch.max(logits, dim=-1, keepdim=True) # (b*s, C)
+    # logits_shifted = logits - max_vals # (b*s, C)
+
+    # # compute log sum exp 
+    # log_sum_exp = torch.log(torch.sum(torch.exp(logits_shifted), dim=-1, keepdim=True)) # (b*s, C)
+    # log_probs = logits_shifted - log_sum_exp # (b*s, C)
+
+    # # corrext probs
+    # correct_log_probs = log_probs.gather(1, targets.unsqueeze(1)) # (b*s, 1)
+    # return -correct_log_probs.mean()
+
     # logits = einops.rearrange(logits, "b c ...., (b c) ...")
     # targets = einops.rearrange(targets, "b c ...., (b c) ...")
     # m = torch.max(logits, dim=-1, keepdim=True)
@@ -682,19 +718,6 @@ def cross_entropy_loss(logits, targets):
     # diff = result - torch.mean(torch.log(sums))
     # return -diff
     # log softmax = (x-max) - log(sum(exp(x-m)))
-    logits = logits.reshape(-1, logits.size(-1)) #(b*s, C)
-    targets = targets.reshape(-1) # (B, C)
-
-    max_vals, _ = torch.max(logits, dim=-1, keepdim=True) # (b*s, C)
-    logits_shifted = logits - max_vals # (b*s, C)
-
-    # compute log sum exp 
-    log_sum_exp = torch.log(torch.sum(torch.exp(logits_shifted), dim=-1, keepdim=True)) # (b*s, C)
-    log_probs = logits_shifted - log_sum_exp # (b*s, C)
-
-    # corrext probs
-    correct_log_probs = log_probs.gather(1, targets.unsqueeze(1)) # (b*s, 1)
-    return -correct_log_probs.mean()
 
 # from cs336_basics.tokenizer import tokenizer
 # def decode(prompt, model, tokenizer, max_token=1, temperature=1, p=None, device=None):
