@@ -135,3 +135,22 @@ def gradient_clipping(parameters, max_l2_norm, eps=1e-6):
             p.grad.mul_(scale)
 
     return total_norm.item()
+
+
+def get_batch(data, batch_size, context_len, device=None):
+    # data is len of token_ids
+    # get the start tokens of size context_len 
+
+    max_start = len(data) - context_len
+    start_index = np.random.randint(0 , high=max_start, size=batch_size) # low, high and size 
+
+    input = []
+    targets = []
+    # do we need to add start and end of index ? 
+    for start in start_index:
+        seq = data[start: start + context_len+1]
+        input.append(seq[:-1])
+        targets.append(seq[1:])
+    
+    return torch.tensor(input, dtype=torch.long, device=device), torch.tensor(targets, dtype=torch.long, device=device)
+        
